@@ -4,8 +4,31 @@ const prefersReducedMotion = window.matchMedia(
   "(prefers-reduced-motion: reduce)",
 ).matches;
 
+let lenis = null;
+
+// INIT LENIS SMOOTH SCROLL
+function initSmoothScroll() {
+  if (typeof Lenis !== "undefined") {
+    lenis = new Lenis({
+      duration: 1.2,
+      easing: (t) => Math.min(1, 1.001 - Math.pow(2, -10 * t)),
+      smoothWheel: true,
+      touchMultiplier: 1.5,
+    });
+
+    lenis.on("scroll", ScrollTrigger.update);
+
+    gsap.ticker.add((time) => {
+      lenis.raf(time * 1000);
+    });
+
+    gsap.ticker.lagSmoothing(0);
+  }
+}
+
 function splitIntoLetters(el) {
-  const text = el.textContent;
+  if (!el) return [];
+  const text = el.textContent || "";
   el.textContent = "";
   text.split("").forEach((char) => {
     const span = document.createElement("span");
@@ -18,14 +41,33 @@ function splitIntoLetters(el) {
 
 function runIntro() {
   const intro = document.getElementById("intro");
+  if (!intro) return;
 
-  if (prefersReducedMotion) {
-    intro.style.display = "none";
+  let isDismissed = false;
+
+  const dismissIntro = () => {
+    if (isDismissed) return;
+    isDismissed = true;
+    clearTimeout(safetyTimeout);
     document.body.style.overflow = "";
+    intro.classList.add("is-dismissed");
+    if (lenis) lenis.start();
+  };
+
+  // 2.5s Safety fallback: guarantees page unblocks no matter what
+  const safetyTimeout = setTimeout(dismissIntro, 2500);
+
+  // Allow clicking anywhere to skip immediately
+  intro.addEventListener("click", dismissIntro);
+
+  if (prefersReducedMotion || sessionStorage.getItem("empire_intro_seen")) {
+    dismissIntro();
     return;
   }
+  sessionStorage.setItem("empire_intro_seen", "true");
 
   document.body.style.overflow = "hidden";
+  if (lenis) lenis.stop();
 
   const line1 = document.getElementById("intro-line-1");
   const line2 = document.getElementById("intro-line-2");
@@ -37,63 +79,88 @@ function runIntro() {
   const panelRight = document.querySelector(".intro-panel--right");
 
   const tl = gsap.timeline({
-    onComplete: () => {
-      document.body.style.overflow = "";
-      intro.style.pointerEvents = "none";
-    },
+    onComplete: dismissIntro,
   });
 
   tl.to([...letters1, ...letters2], {
     opacity: 1,
     y: 0,
-    duration: 0.5,
+    duration: 0.45,
     ease: "power3.out",
-    stagger: 0.045,
+    stagger: 0.035,
   })
     .to(
       mark,
-      { opacity: 1, rotate: 90, duration: 0.5, ease: "power2.out" },
-      "-=0.2",
+      { opacity: 1, rotate: 90, duration: 0.4, ease: "power2.out" },
+      "-=0.15",
     )
-    .to(coord, { opacity: 1, duration: 0.4, ease: "power1.out" }, "-=0.2")
-    .to({}, { duration: 0.35 })
+    .to(coord, { opacity: 1, duration: 0.3, ease: "power1.out" }, "-=0.15")
+    .to({}, { duration: 0.25 })
     .to(
       panelLeft,
-      { xPercent: -100, duration: 0.9, ease: "power3.inOut" },
+      { xPercent: -100, duration: 0.8, ease: "power3.inOut" },
       "+=0",
     )
-    .to(panelRight, { xPercent: 100, duration: 0.9, ease: "power3.inOut" }, "<")
+    .to(panelRight, { xPercent: 100, duration: 0.8, ease: "power3.inOut" }, "<")
     .to(
       ".intro-content",
-      { opacity: 0, duration: 0.5, ease: "power2.out" },
+      { opacity: 0, duration: 0.4, ease: "power2.out" },
       "<",
     );
 }
 
-// NAV
+// NAV & ANCHOR SCROLL
 function initNav() {
   const nav = document.getElementById("navbar");
-  ScrollTrigger.create({
-    start: 50,
-    end: 99999,
-    onUpdate: (self) => {
-      nav.style.paddingTop = self.scroll() > 50 ? "0" : "0";
-      nav.classList.toggle("is-scrolled", self.scroll() > 50);
-    },
-  });
+  if (nav) {
+    ScrollTrigger.create({
+      start: 50,
+      end: 99999,
+      onUpdate: (self) => {
+        nav.classList.toggle("is-scrolled", self.scroll() > 50);
+      },
+    });
+  }
 
   const menuBtn = document.getElementById("menu-btn");
   const mobileMenu = document.getElementById("mobile-menu");
-  menuBtn.addEventListener("click", () => {
-    mobileMenu.classList.toggle("is-open");
-  });
-  document.querySelectorAll(".mobile-link").forEach((link) => {
-    link.addEventListener("click", () =>
-      mobileMenu.classList.remove("is-open"),
-    );
+  if (menuBtn && mobileMenu) {
+    menuBtn.addEventListener("click", () => {
+      mobileMenu.classList.toggle("is-open");
+    });
+    document.querySelectorAll(".mobile-link").forEach((link) => {
+      link.addEventListener("click", () =>
+        mobileMenu.classList.remove("is-open"),
+      );
+    });
+  }
+
+  // Smooth scroll for anchor links
+  document.querySelectorAll('a[href^="#"]').forEach((anchor) => {
+    anchor.addEventListener("click", (e) => {
+      const targetId = anchor.getAttribute("href");
+      if (!targetId || targetId === "#") return;
+      const targetEl = document.querySelector(targetId);
+      if (targetEl) {
+        e.preventDefault();
+        const headerOffset = 80;
+        const elementPosition = targetEl.getBoundingClientRect().top;
+        const currentScroll = lenis ? lenis.scroll : window.pageYOffset;
+        const offsetPosition = elementPosition + currentScroll - headerOffset;
+
+        if (lenis) {
+          lenis.scrollTo(offsetPosition, { duration: 1.2 });
+        } else {
+          window.scrollTo({
+            top: offsetPosition,
+            behavior: "smooth",
+          });
+        }
+      }
+    });
   });
 
-  // Force lecture video sur mobile
+  // Force video playback
   const video = document.querySelector(".hero-video-bg");
   if (video) {
     video.play().catch(() => {});
@@ -121,18 +188,20 @@ function initReveals() {
 
   gsap.utils.toArray(".program-grid, .pricing-grid").forEach((grid) => {
     const cards = grid.querySelectorAll(".program-card, .price-card");
-    gsap.fromTo(
-      cards,
-      { opacity: 0, y: prefersReducedMotion ? 0 : 24 },
-      {
-        opacity: 1,
-        y: 0,
-        duration: 0.6,
-        ease: "power2.out",
-        stagger: 0.08,
-        scrollTrigger: { trigger: grid, start: "top 85%" },
-      },
-    );
+    if (cards.length) {
+      gsap.fromTo(
+        cards,
+        { opacity: 0, y: prefersReducedMotion ? 0 : 24 },
+        {
+          opacity: 1,
+          y: 0,
+          duration: 0.6,
+          ease: "power2.out",
+          stagger: 0.08,
+          scrollTrigger: { trigger: grid, start: "top 85%" },
+        },
+      );
+    }
   });
 }
 
@@ -140,6 +209,7 @@ function initReveals() {
 function initCounters() {
   document.querySelectorAll("[data-count]").forEach((el) => {
     const target = parseInt(el.getAttribute("data-count"), 10);
+    if (isNaN(target)) return;
     ScrollTrigger.create({
       trigger: el,
       start: "top 90%",
@@ -200,9 +270,11 @@ function initForm() {
   form.addEventListener("submit", (e) => {
     e.preventDefault();
     const btn = form.querySelector("button");
-    const original = btn.textContent;
-    btn.textContent = "ENVOYÉ ✓";
-    setTimeout(() => (btn.textContent = original), 2200);
+    if (btn) {
+      const original = btn.textContent;
+      btn.textContent = "ENVOYÉ ✓";
+      setTimeout(() => (btn.textContent = original), 2200);
+    }
     form.reset();
   });
 }
@@ -215,6 +287,7 @@ function initYear() {
 
 // INIT
 document.addEventListener("DOMContentLoaded", () => {
+  initSmoothScroll();
   runIntro();
   initNav();
   initReveals();
